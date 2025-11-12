@@ -1,68 +1,94 @@
 const express = require('express');
-const router = express.Router();
 const jwt = require('jsonwebtoken');
 const Transaction = require('../models/Transaction');
 
-// Middleware to verify token
+const router = express.Router();
+
+/**
+ * Middleware to authenticate JWT token
+ */
 const authenticate = (req, res, next) => {
-  const token = req.headers.authorization;
-
-  if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
-
   try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ message: 'Access denied. No token provided.' });
+    }
+
+    // Expected format: "Bearer <token>"
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : authHeader;
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
     next();
-  } catch (err) {
-    res.status(400).json({ message: 'Invalid token' });
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid or expired token', error: error.message });
   }
 };
 
-// Add new transaction
+/**
+ * @route   POST /api/transactions
+ * @desc    Add new transaction
+ */
 router.post('/', authenticate, async (req, res) => {
   try {
     const { type, amount, category, date } = req.body;
 
-    const transaction = new Transaction({
+    if (!type || !amount || !category || !date) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    const newTransaction = new Transaction({
       userId: req.userId,
       type,
       amount,
       category,
-      date
+      date,
     });
 
-    await transaction.save();
-    res.status(201).json({ message: 'Transaction added successfully' });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to add transaction', error: err.message });
+    const savedTransaction = await newTransaction.save();
+
+    res.status(201).json({
+      message: 'Transaction added successfully',
+      transaction: savedTransaction,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to add transaction', error: error.message });
   }
 });
 
-// Get all transactions for logged-in user
+/**
+ * @route   GET /api/transactions
+ * @desc    Fetch all transactions of logged-in user
+ */
 router.get('/', authenticate, async (req, res) => {
   try {
     const transactions = await Transaction.find({ userId: req.userId }).sort({ createdAt: -1 });
     res.status(200).json(transactions);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch transactions', error: err.message });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch transactions', error: error.message });
   }
 });
 
-// Delete a transaction
+/**
+ * @route   DELETE /api/transactions/:id
+ * @desc    Delete a transaction by ID
+ */
 router.delete('/:id', authenticate, async (req, res) => {
   try {
-    const transaction = await Transaction.findOneAndDelete({
+    const deletedTransaction = await Transaction.findOneAndDelete({
       _id: req.params.id,
-      userId: req.userId
+      userId: req.userId,
     });
 
-    if (!transaction) {
-      return res.status(404).json({ message: 'Transaction not found' });
+    if (!deletedTransaction) {
+      return res.status(404).json({ message: 'Transaction not found or unauthorized' });
     }
 
     res.status(200).json({ message: 'Transaction deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to delete transaction', error: err.message });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to delete transaction', error: error.message });
   }
 });
 
